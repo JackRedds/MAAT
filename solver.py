@@ -384,6 +384,101 @@ class Solver(object):
         return accuracy, precision, recall, f_score
 
 
+class GWSolver(Solver):
+    """
+    Solver variant for training/testing MAAT on real gravitational-wave
+    interferometer background strain (e.g. H1/L1) for glitch (instrumental
+    anomaly) detection, built on the same data primitives amplfi/ml4gw use
+    for their own training pipelines rather than a bespoke windowing/scaling
+    scheme -- see `data_factory.gw_data_loader` for the `Hdf5TimeSeriesDataset`
+    / `InMemoryDataset` sampling and `PsdEstimator` + `Whiten` preprocessing
+    this wraps.
+
+    Unlike the other datasets, the model's window length isn't set directly:
+    it falls out of `sample_rate`, `kernel_length`, `fduration` and
+    `psd_length`, which together determine how much raw background strain is
+    pulled per training/testing segment and how much of it survives PSD
+    estimation and whitening to become the `win_size`-sample window MAAT
+    actually sees (`win_size = kernel_length * sample_rate`). The
+    reconstruction / association-discrepancy training, validation and
+    testing loops (`train`, `vali`, `test`) are otherwise unchanged from
+    `Solver`.
+
+    Config keys beyond the base `Solver`'s:
+        ifos: interferometer channels to use, e.g. ['H1', 'L1']
+        sample_rate: strain sample rate in Hz
+        kernel_length: length, in seconds, of the whitened window seen by the model
+        fduration: whitening filter impulse response length, in seconds
+            (fduration / 2 seconds are cropped from each edge of the whitened window)
+        psd_length: length, in seconds, of data used to estimate the background PSD
+        fftlength: FFT length, in seconds, used for PSD estimation
+            (defaults to kernel_length + fduration)
+        highpass: highpass cutoff frequency in Hz applied during whitening (optional)
+        batches_per_epoch: number of training batches sampled per epoch
+        val_batches_per_epoch: number of validation batches sampled per epoch
+            (defaults to 25); the final test/threshold pass is always exhaustive
+        val_fraction: fraction of training segment files held out for validation
+        glitch_file: optional CSV (with a `gps_time` column) or `.npy` array of
+            known glitch GPS times, used to label the held-out test segments for
+            evaluation. Training remains unsupervised regardless.
+        glitch_half_width: seconds around each glitch time labeled anomalous
+    """
+
+    DEFAULTS = {
+        'dataset': 'GW',
+        'ifos': ['H1', 'L1'],
+        'sample_rate': 2048.0,
+        'kernel_length': 1.0,
+        'fduration': 1.0,
+        'psd_length': 8.0,
+        'fftlength': None,
+        'highpass': None,
+        'batches_per_epoch': 200,
+        'val_batches_per_epoch': None,
+        'val_fraction': 0.1,
+        'glitch_file': None,
+        'glitch_half_width': 0.1,
+    }
+
+    def __init__(self, config):
+        # imported lazily so the rest of MAAT doesn't pick up a hard
+        # dependency on ml4gw just to import this module
+        from data_factory.gw_data_loader import get_gw_loader
+
+        merged = {**GWSolver.DEFAULTS, **config}
+        self.__dict__.update(merged)
+
+        self.input_c = self.output_c = len(self.ifos)
+
+        loader_kwargs = dict(
+            ifos=self.ifos,
+            sample_rate=self.sample_rate,
+            kernel_length=self.kernel_length,
+            fduration=self.fduration,
+            psd_length=self.psd_length,
+            fftlength=self.fftlength,
+            highpass=self.highpass,
+            val_fraction=self.val_fraction,
+            batches_per_epoch=self.batches_per_epoch,
+            val_batches_per_epoch=self.val_batches_per_epoch,
+            glitch_file=self.glitch_file,
+            glitch_half_width=self.glitch_half_width,
+        )
+        self.train_loader = get_gw_loader(self.data_path, self.batch_size, mode='train', **loader_kwargs)
+        self.vali_loader = get_gw_loader(self.data_path, self.batch_size, mode='val', **loader_kwargs)
+        self.test_loader = get_gw_loader(self.data_path, self.batch_size, mode='test', **loader_kwargs)
+        self.thre_loader = get_gw_loader(self.data_path, self.batch_size, mode='thre', **loader_kwargs)
+
+        # win_size falls out of kernel_length/sample_rate rather than being
+        # configured directly -- see class docstring
+        self.win_size = self.train_loader.win_size
+
+        self.build_model()
+        gpu_index = self.get_gpu_index()
+        self.device = torch.device("cuda:" + str(gpu_index) if torch.cuda.is_available() else "cpu")
+        self.criterion = nn.MSELoss()
+
+
 # Example usage
 if __name__ == '__main__':
     gt = np.load("data/events_pred_MSL.npy") + 0
