@@ -83,7 +83,7 @@ class Encoder(nn.Module):
 
 class MambaAnomalyTransformer(nn.Module):
     def __init__(self, win_size, enc_in, c_out, d_model=512, n_heads=8, block_size=10, e_layers=3, d_ff=512,
-                 dropout=0.0, activation='gelu', output_attention=True):
+                 dropout=0.0, activation='gelu', output_attention=True, use_sparse_attention=False):
         super(MambaAnomalyTransformer, self).__init__()
         self.output_attention = output_attention
 
@@ -96,7 +96,8 @@ class MambaAnomalyTransformer(nn.Module):
                 EncoderLayer(
                     AttentionLayer(
                         AnomalyAttention(win_size, d_model, n_heads, block_size, attention_dropout=dropout,
-                                         output_attention=output_attention),
+                                         output_attention=output_attention,
+                                         use_sparse_attention=use_sparse_attention),
                         d_model, n_heads),
                     d_model,
                     d_ff,

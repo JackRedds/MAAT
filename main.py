@@ -43,6 +43,23 @@ if __name__ == '__main__':
     parser.add_argument('--anormly_ratio', type=float, default=4.00)
     parser.add_argument('--gpu_index', type=int, default=0, help='Index of the GPU to use')
     parser.add_argument('--multi_gpu', type=str2bool, default=True, help='Enable multi-GPU training')
+    # Model size/shape (see model/MambaAnomalyTransformer.py). Note self-attention
+    # memory/compute scales as batch_size * n_heads * win_size^2, so for long
+    # windows (e.g. GW's win_size = kernel_length * sample_rate) batch_size and
+    # kernel_length matter far more than these for whether a run fits in GPU memory.
+    parser.add_argument('--d_model', type=int, default=512, help='Model/embedding dimension')
+    parser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
+    parser.add_argument('--e_layers', type=int, default=3, help='Number of encoder layers')
+    parser.add_argument('--d_ff', type=int, default=512, help='Feed-forward dimension inside each encoder layer')
+    parser.add_argument('--block_size', type=int, default=10,
+                        help='Block size for sparse attention (must evenly divide win_size); '
+                             'unused unless --use_sparse_attention is set')
+    parser.add_argument('--use_sparse_attention', type=str2bool, default=False,
+                        help='Restrict attention to local blocks of size --block_size instead of full '
+                             'self-attention. NOTE: as currently implemented this still computes the full '
+                             'win_size x win_size score matrix before masking it, so it does NOT reduce '
+                             'memory use -- it only changes which positions attend to which. To fit long '
+                             'GW windows in memory, lower --batch_size and/or --kernel_length instead.')
     # GWSolver-only options (used when --dataset GW). Note --win_size above is
     # ignored for GW: the model's window length instead falls out of
     # --sample_rate/--kernel_length (see GWSolver's docstring).

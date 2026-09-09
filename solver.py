@@ -89,7 +89,12 @@ class Solver(object):
         return gpu_index
 
     def build_model(self):
-        self.model = MambaAnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3)
+        self.model = MambaAnomalyTransformer(
+            win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c,
+            d_model=self.d_model, n_heads=self.n_heads, e_layers=self.e_layers,
+            d_ff=self.d_ff, block_size=self.block_size,
+            use_sparse_attention=self.use_sparse_attention,
+        )
         if self.multi_gpu:
             self.model = nn.DataParallel(self.model)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
